@@ -21,6 +21,7 @@
 import Domoticz
 import urllib.parse
 import json
+import datetime
 
 class BasePlugin:
     enabled = False
@@ -40,6 +41,10 @@ class BasePlugin:
         self.command = False
         self.refresh = True
         self.actions_serialized = []
+        self.delay_beetween_commands = 25
+        self.last_execution_command_date = datetime.datetime.now()
+        self.last_command_sent = None
+        self.last_device_id_executing_command = None
         return
 
     def onStart(self):
@@ -218,13 +223,20 @@ class BasePlugin:
           Domoticz.Log("Return status"+str(Status))
 
     def onCommand(self, Unit, Command, Level, Hue):
+        now = datetime.datetime.now()
+        diffDelayBeetweenCommands = now - self.last_execution_command_date
+        deviceIdExecutingCommand = Devices[Unit].DeviceID
+
         commands_serialized = []
         action = {}
         commands = {}
         params = []
 
-
-        if (str(Command) == "Off"):
+        if (str(Command) == "Off" and int(diffDelayBeetweenCommands.seconds) <= int(self.delay_beetween_commands) and self.last_command_sent == "close" and str(self.last_device_id_executing_command) == str(deviceIdExecutingCommand)):
+          commands["name"] = "stop"
+        elif (str(Command) == "On" and int(diffDelayBeetweenCommands.seconds) <= int(self.delay_beetween_commands) and self.last_command_sent == "open" and str(self.last_device_id_executing_command) == str(deviceIdExecutingCommand)):
+          commands["name"] = "stop"
+        elif (str(Command) == "Off"):
           commands["name"] = "close"
         elif (str(Command) == "On"):
           commands["name"] = "open"
@@ -240,6 +252,10 @@ class BasePlugin:
         self.actions_serialized.append(action)
         data = {"label": "Domoticz - "+Devices[Unit].Name+" - "+commands["name"], "actions": self.actions_serialized}
         self.json_data = json.dumps(data, indent=None, sort_keys=True)
+        
+        self.last_command_sent = str(commands["name"])
+        self.last_execution_command_date = datetime.datetime.now()
+        self.last_device_id_executing_command = Devices[Unit].DeviceID
 
         if (not self.httpConn.Connected()):
           Domoticz.Log("Not connected before processing command, must connect")
@@ -257,6 +273,7 @@ class BasePlugin:
         return
 
     def onHeartbeat(self):
+        
         if (self.cookie and self.logged_in and ((not self.heartbeat) or self.heartbeat_delay == 3)):
           if (not self.httpConn.Connected()):
             self.httpConn.Connect()
